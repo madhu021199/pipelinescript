@@ -1,0 +1,148 @@
+/* ============================================================
+   JENKINSFILE — Single-file CI/CD Pipeline
+   GitHub -> Jenkins -> Unit Tests -> SonarQube -> Docker Build -> Deploy
+   Everything (including the Dockerfile) is generated inline,
+   so this one file is the entire pipeline definition.
+   ============================================================ */
+
+pipeline {
+    agent any
+
+    tools {
+        maven 'Maven3'   // Configure in Jenkins > Global Tool Configuration
+        jdk 'JDK17'      // Configure in Jenkins > Global Tool Configuration
+    }
+
+    environment {
+        DOCKER_IMAGE       = "myapp"
+        DOCKER_TAG         = "${env.BUILD_NUMBER}"
+        DOCKER_REGISTRY    = "myregistry.example.com"
+        SONAR_PROJECT_KEY  = "myapp-key"
+        APP_PORT           = "8080"
+    }
+
+    triggers {
+        githubPush()   // Requires GitHub webhook -> Jenkins
+    }
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timestamps()
+        disableConcurrentBuilds()
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/your-org/your-repo.git',
+                    credentialsId: 'github-credentials'
+            }
+        }
+
+        stage('Generate Dockerfile') {
+            steps {
+                // Dockerfile is written at runtime so the whole pipeline
+                // definition (build + container spec) lives in this one Jenkinsfile.
+                writeFile file: 'Dockerfile', text: '''
+FROM eclipse-temurin:17-jdk-alpine AS build
+WORKDIR /app
+COPY . .
+RUN ./mvnw clean package -DskipTests || mvn clean package -DskipTests
+
+FROM eclipse-temurin:17-jre-alpine
+WORKDIR /app
+COPY --from=build /app/target/*.jar app.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "app.jar"]
+'''.stripIndent()
+            }
+        }
+
+        stage('Build') {
+            steps {
+                sh 'mvn clean compile'
+            }
+        }
+
+        stage('Unit Tests') {
+            steps {
+                sh 'mvn test'
+            }
+            post {
+                always {
+                    junit '**/target/surefire-reports/*.xml'
+                }
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('SonarQube') {
+                    sh """
+                        mvn sonar:sonar \
+                          -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                          -Dsonar.host.url=$SONAR_HOST_URL \
+                          -Dsonar.login=$SONAR_AUTH_TOKEN
+                    """
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        stage('Package') {
+            steps {
+                sh 'mvn package -DskipTests'
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh "docker build -t ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG} ."
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'docker-registry-creds',
+                                                   usernameVariable: 'DOCKER_USER',
+                                                   passwordVariable: 'DOCKER_PASS')]) {
+                    sh """
+                        echo \$DOCKER_PASS | docker login ${DOCKER_REGISTRY} -u \$DOCKER_USER --password-stdin
+                        docker push ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}
+                    """
+                }
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                sh """
+                    docker stop ${DOCKER_IMAGE} || true
+                    docker rm ${DOCKER_IMAGE} || true
+                    docker run -d --name ${DOCKER_IMAGE} -p ${APP_PORT}:${APP_PORT} ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}
+                """
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "✅ Pipeline completed successfully — build #${env.BUILD_NUMBER} deployed."
+        }
+        failure {
+            echo "❌ Pipeline failed — check logs above for the failing stage."
+        }
+        always {
+            cleanWs()
+        }
+    }
+}
