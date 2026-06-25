@@ -1,0 +1,17 @@
+{
+  "validRegistration": {
+    "registerAs": "Individual",
+    "firstName": "John",
+    "lastName": "Doe",
+    "email": "john.doe@example.com",
+    "phone": "1234567890",
+    "designation": "Engineer"
+  },
+  "invalidEmail": {
+    "email": "invalid-email"
+  },
+  "passwordMismatch": {
+    "password": "password123",
+    "confirmPassword": "password321"
+  }
+}

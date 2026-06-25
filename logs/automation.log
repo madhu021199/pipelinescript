@@ -1,0 +1,5 @@
+2026-04-09 23:31:11 [main] INFO  com.registration.stepdefinitions.RegistrationSteps - Navigating to the registration page
+2026-04-09 23:31:19 [main] INFO  com.registration.stepdefinitions.RegistrationSteps - Leaving all mandatory fields blank
+2026-04-09 23:31:19 [main] INFO  com.registration.stepdefinitions.RegistrationSteps - Submitting the registration form
+2026-04-09 23:31:23 [main] INFO  com.registration.stepdefinitions.RegistrationSteps - Validating error messages for all mandatory fields
+2026-04-09 23:31:23 [main] INFO  com.registration.stepdefinitions.RegistrationSteps - Tearing down the WebDriver instance
